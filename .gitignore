@@ -102,3 +102,6 @@ ENV/
 
 # Pycharm stuff
 .idea/workspace.xml
+
+# Project specific ignores
+results/
