@@ -1,76 +1,206 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
 import sys
 import json
 import time
 import random
+from utils.batch_factory import BatchFactory
+import glob
+import argparse
+
 import tensorflow as tf
 
 
 # See the __init__ script in the models folder
 # `make_models` is a helper function to load any models you have
 from models import make_model
-from hpsearch import hyperband, randomsearch
+from models import available_models
+# from hpsearch import hyperband, randomsearch
 
 # I personally always like to make my paths absolute
 # to be independent from where the python binary is called
 dir = os.path.dirname(os.path.realpath(__file__))
 
-# I won't dig into TF interaction with the shell, feel free to explore the documentation
-flags = tf.app.flags
-
-
-# Hyper-parameters search configuration
-flags.DEFINE_boolean('fullsearch', False, 'Perform a full search of hyperparameter space ex:(hyperband -> lr search -> hyperband with best lr)')
-flags.DEFINE_boolean('dry_run', False, 'Perform a dry_run (testing purpose)')
-flags.DEFINE_integer('nb_process', 4, 'Number of parallel process to perform a HP search')
-
-# fixed_params is a trick I use to be able to fix some parameters inside the model random function
-# For example, one might want to explore different models fixing the learning rate, see the basic_model get_random_config function
-flags.DEFINE_string('fixed_params', "{}", 'JSON inputs to fix some params in a HP search, ex: \'{"lr": 0.001}\'')
-
-
-# Agent configuration
-flags.DEFINE_string('model_name', 'DQNAgent', 'Unique name of the model')
-flags.DEFINE_boolean('best', False, 'Force to use the best known configuration')
-flags.DEFINE_float('initial_mean', 0., 'Initial mean for NN')
-flags.DEFINE_float('initial_stddev', 1e-2, 'Initial standard deviation for NN')
-flags.DEFINE_float('lr', 1e-3, 'The learning rate of SGD')
-flags.DEFINE_float('nb_units', 20, 'Number of hidden units in Deep learning agents')
-
-
-# Environment configuration
-flags.DEFINE_boolean('debug', False, 'Debug mode')
-flags.DEFINE_integer('max_iter', 2000, 'Number of training step')
-flags.DEFINE_boolean('infer', False, 'Load an agent for playing')
-
-# This is very important for TensorBoard
-# each model will end up in its own unique folder using time module
-# Obviously one can also choose to name the output folder
-flags.DEFINE_string('result_dir', dir + '/results/' + flags.FLAGS.model_name + '/' + str(int(time.time())),
-                    'Name of the directory to store/log the model (if it exists, the model will be loaded from it)')
-
-# Another important point, you must provide an access to the random seed
-# to be able to fully reproduce an experiment
-flags.DEFINE_integer('random_seed', random.randint(0, sys.maxsize), 'Value of random seed')
 
 def main(_):
-    config = flags.FLAGS.__flags.copy()
-    # fixed_params must be a string to be passed in the shell, let's use JSON
-    config["fixed_params"] = json.loads(config["fixed_params"])
+    # config = flags.FLAGS.__flags.copy()
 
-    if config['fullsearch']:
+    # fixed_params must be a string to be passed in the shell, let's use JSON
+    # config["fixed_params"] = json.loads(config["fixed_params"])
+    config.fixed_params = json.loads(config.fixed_params)
+
+    high_res_protein_feature_filenames = sorted(
+        glob.glob(os.path.join(config.data_dir, "*protein_features.npz")))
+    high_res_grid_feature_filenames = sorted(
+        glob.glob(os.path.join(config.data_dir, "*residue_features.npz")))
+
+    validation_end = int(len(high_res_protein_feature_filenames) * (1. - config.test_fraction))
+    train_end = validation_start = int(validation_end * (1. - config.validation_fraction))
+
+    if not config.mode == 'infer' and not config.mode == 'test':
+        train_data = BatchFactory()
+        train_data.add_data_set("high_res",
+                                high_res_protein_feature_filenames[:train_end],
+                                high_res_grid_feature_filenames[:train_end],
+                                duplicate_origin=config.duplicate_origin)
+        train_data.add_data_set("model_output",
+                                high_res_protein_feature_filenames[:train_end],
+                                key_filter=[config.data_type + "_one_hot"])
+
+        validation_data = BatchFactory()
+        validation_data.add_data_set("high_res",
+                                     high_res_protein_feature_filenames[validation_start:validation_end],
+                                     high_res_grid_feature_filenames[validation_start:validation_end],
+                                     duplicate_origin=config.duplicate_origin)
+        validation_data.add_data_set("model_output",
+                                     high_res_protein_feature_filenames[validation_start:validation_end],
+                                     key_filter=[config.data_type + "_one_hot"])
+    elif config.mode == 'test':
+        test_data = BatchFactory()
+        test_data.add_data_set("high_res",
+                               high_res_protein_feature_filenames[validation_end:],
+                               high_res_grid_feature_filenames[validation_end:],
+                               duplicate_origin=config.duplicate_origin)
+        test_data.add_data_set("model_output",
+                               high_res_protein_feature_filenames[validation_end:],
+                               key_filter=[config.data_type + "_one_hot"])
+    if config.fullsearch:
         pass
         # Some code for HP search ...
+    elif config.dry_run:
+        model = make_model(config)
     else:
         model = make_model(config)
-
-        if config['infer']:
-            pass
-            # Some code for inference ...
+        if config.mode == 'infer':
+            model.infer()
         else:
-            pass
-            # Some code for training ...
-
+            if config.mode == 'test':
+                model.test(test_data)
+            elif config.mode == 'train':
+                model.train(train_data, validation_data)
+                model.save('end')
+            # No need to capture wrong mode, not allowed by argparser
 
 if __name__ == '__main__':
-  tf.app.run()
+    parser = argparse.ArgumentParser(description='''\t\t+-------------------------------------+
+\t\t|                                     |
+\t\t|              ProtNets               |
+\t\t|                                     |
+\t\t|         Neural networks for         |
+\t\t|  protein spherical representations  |
+\t\t|                                     |
+\t\t|                                     |
+\t\t+-------------------------------------+
+''', formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    parser.add_argument('--fullsearch',
+                        action='store_true',
+                        help='Perform a full search of hyperparameter space ex:(hyperband > lr search > hyperband '
+                             'with best lr) (default: %(default)s)')
+    parser.add_argument('--dry_run',
+                        action='store_true',
+                        help='Perform a dry_run (default: %(default)s)')
+    parser.add_argument('--nb_process',
+                        default=4,
+                        type=int,
+                        help='Number of parallel process to perform a HP search (default: %(default)s)')
+
+    # fixed_params is a trick I use to be able to fix some parameters inside the model random function
+    # For example, one might want to explore different models fixing the learning rate, see the basic_model
+    # get_random_config function
+    parser.add_argument('--fixed_params',
+                        default='{}',
+                        type=str,
+                        help='JSON inputs to fix some params in a HP search, ex: {"lr": 0.001} (default: %(default)s)')
+
+    # Agent configuration
+    parser.add_argument('--model_name',
+                        default='CNN',
+                        type=str,
+                        choices=available_models,
+                        help='Unique name of the model (default: %(default)s)')
+    parser.add_argument('--optimizer',
+                        default='Adam',
+                        type=str,
+                        choices=['Adam', 'Nesterov', 'AdaDelta'],
+                        help='Model optimizer (default: %(default)s)')
+    parser.add_argument('--best',
+                        action='store_true',
+                        help='Force to use the best known configuration (default: %(default)s)')
+    parser.add_argument('--l2_beta',
+                        default=0.001,
+                        type=float,
+                        help='Initial mean for the neural network (default: %(default)s)')
+    parser.add_argument('--initial_stddev',
+                        default=0.1,
+                        type=float,
+                        help='Initial standard deviation for the neural network (default: %(default)s)')
+    parser.add_argument('--lr',
+                        default=1e-3,
+                        type=float,
+                        help='The learning rate of SGD (default: %(default)s)')
+    parser.add_argument('--dropout',
+                        default=0.5,
+                        type=float,
+                        help='Dropout value for training (default: %(default)s)')
+
+    # Environment configuration
+    parser.add_argument('--debug',
+                        action='store_true',
+                        help='Debug mode (default: %(default)s)')
+    parser.add_argument('--max_iter',
+                        default=10,
+                        type=int,
+                        help='Number of training steps (default: %(default)s)')
+    parser.add_argument('--mode',
+                        type=str,
+                        default='train',  # FIXME: Change back to infer when finished
+                        choices=['train', 'test', 'infer'],
+                        help='Infer from single data input (default: %(default)s)')
+
+    # This is very important for TensorBoard
+    # each model will end up in its own unique folder using time module
+    # Obviously one can also choose to name the output folder
+    parser.add_argument('--result_dir',
+                        default=os.path.join(dir, 'results', str(int(time.time()))),
+                        help='Name of the directory to store/log the model (if it exists, the model will be loaded '
+                             'from it) (default: %(default)s)')
+    parser.add_argument('--data_dir',
+                        default=os.path.join(dir, 'data',  'culled_pc30', 'atomistic_features_spherical'),
+                        type=str,
+                        help='Name of the directory with the data for training and testing (default: %(default)s)')
+
+    #  Another important point, you must provide an access to the random seed
+    # to be able to fully reproduce an experiment
+    parser.add_argument('--random_seed',
+                        default=random.randint(0, sys.maxsize),
+                        type=int,
+                        help='Value of random seed')
+
+    # Data division
+    parser.add_argument('--validation_fraction',
+                        default=0.10,
+                        type=float,
+                        help='Validation data fraction from train set (default: %(default)s)')
+    parser.add_argument('--test_fraction',
+                        default=0.10,
+                        type=float,
+                        help='Validation data fraction from train set (default: %(default)s)')
+    parser.add_argument('--data_type',
+                        default='aa',
+                        type=str,
+                        help='Data type to be trained on (default: %(default)s)',
+                        choices=['aa', 'ss'])
+    parser.add_argument("--duplicate_origin",
+                        action='store_true',
+                        help="Whether to duplicate the atoms in all bins at the origin for the spherical model")
+    parser.add_argument("--max-batch-size",
+                        help="Maximum batch size used during training (default: %(default)s)", type=int, default=1000)
+    parser.add_argument("--subbatch-max-size",
+                        help="Maximum batch size used for gradient calculation (default: %(default)s)", type=int,
+                        default=25)
+    config = parser.parse_args()
+    tf.app.run(main=main)
