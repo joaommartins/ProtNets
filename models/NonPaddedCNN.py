@@ -28,6 +28,7 @@ class NonPaddedCNN(BaseModel):
         with self.graph.as_default():
             # LAYER 0
             with tf.variable_scope('inputs'):
+                self.phase_train = tf.placeholder(tf.bool, name='phase_train')
                 self.input = tf.placeholder(tf.float32,
                                             shape=[None] + self.input_shape,
                                             name='input_values')

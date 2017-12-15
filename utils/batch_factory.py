@@ -260,7 +260,8 @@ class BatchFactory:
         # Keep track of completed cycles through data
         self.epoch_count = 0
 
-    def add_data_set(self, key, protein_feature_filenames, grid_feature_filenames=None, key_filter=[], duplicate_origin=False):
+    def add_data_set(self, key, protein_feature_filenames, grid_feature_filenames=None, key_filter=[], duplicate_origin=False,
+                     shuffle=True):
 
         if grid_feature_filenames is None:
             grid_feature_filenames = [None]*len(protein_feature_filenames)
@@ -285,17 +286,18 @@ class BatchFactory:
             self.features[pdb_id][key] = protein_data
 
         # Randomize order of proteins
-        self.shuffle_features()
+        self.shuffle_features(shuffle)
 
     def data_size(self):
         return len(self.features_expanded)
             
-    def shuffle_features(self):
+    def shuffle_features(self, shuffle=True):
         '''Randomize order of pdb_ids'''
 
         # Randomize order
         feature_pdb_ids = self.features.keys()
-        random.shuffle(feature_pdb_ids)
+        if shuffle:
+            random.shuffle(feature_pdb_ids)
 
         # Repopulate self.features_expanded
         self.features_expanded = []
@@ -306,7 +308,8 @@ class BatchFactory:
         # Reset index counter
         self.feature_index = 0
 
-    def next(self, max_size=10, enforce_protein_boundaries=True, subbatch_max_size=None, increment_counter=True, include_pdb_ids=False, return_single_proteins=False):
+    def next(self, max_size=10, enforce_protein_boundaries=True, subbatch_max_size=None, increment_counter=True,
+             include_pdb_ids=False, return_single_proteins=False, shuffle=True):
         '''Create next batch
         '''
 
@@ -416,7 +419,7 @@ class BatchFactory:
         # If counter passes total number of features, reshuffle and reset
         if self.feature_index >= len(self.features_expanded):
             self.epoch_count += 1
-            self.shuffle_features()
+            self.shuffle_features(shuffle)
 
         # Make sure that feature_index is correctly set to zero if running on the complete se.
         if max_size == len(self.features_expanded) and not return_single_proteins:

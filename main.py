@@ -40,33 +40,44 @@ def main(_):
     validation_end = int(len(high_res_protein_feature_filenames) * (1. - config.test_fraction))
     train_end = validation_start = int(validation_end * (1. - config.validation_fraction))
 
+    if config.debug:
+        shuffle_opt = False
+    else:
+        shuffle_opt = True
+
     if not config.mode == 'infer' and not config.mode == 'test':
         train_data = BatchFactory()
         train_data.add_data_set("high_res",
                                 high_res_protein_feature_filenames[:train_end],
                                 high_res_grid_feature_filenames[:train_end],
-                                duplicate_origin=config.duplicate_origin)
+                                duplicate_origin=config.duplicate_origin,
+                                shuffle=shuffle_opt)
         train_data.add_data_set("model_output",
                                 high_res_protein_feature_filenames[:train_end],
-                                key_filter=[config.data_type + "_one_hot"])
+                                key_filter=[config.data_type + "_one_hot"],
+                                shuffle=shuffle_opt)
 
         validation_data = BatchFactory()
         validation_data.add_data_set("high_res",
                                      high_res_protein_feature_filenames[validation_start:validation_end],
                                      high_res_grid_feature_filenames[validation_start:validation_end],
-                                     duplicate_origin=config.duplicate_origin)
+                                     duplicate_origin=config.duplicate_origin,
+                                     shuffle=shuffle_opt)
         validation_data.add_data_set("model_output",
                                      high_res_protein_feature_filenames[validation_start:validation_end],
-                                     key_filter=[config.data_type + "_one_hot"])
+                                     key_filter=[config.data_type + "_one_hot"],
+                                     shuffle=shuffle_opt)
     elif config.mode == 'test':
         test_data = BatchFactory()
         test_data.add_data_set("high_res",
                                high_res_protein_feature_filenames[validation_end:],
                                high_res_grid_feature_filenames[validation_end:],
-                               duplicate_origin=config.duplicate_origin)
+                               duplicate_origin=config.duplicate_origin,
+                               shuffle=shuffle_opt)
         test_data.add_data_set("model_output",
                                high_res_protein_feature_filenames[validation_end:],
-                               key_filter=[config.data_type + "_one_hot"])
+                               key_filter=[config.data_type + "_one_hot"],
+                               shuffle=shuffle_opt)
     if config.fullsearch:
         pass
         # Some code for HP search ...
@@ -146,6 +157,9 @@ if __name__ == '__main__':
                         default=0.5,
                         type=float,
                         help='Dropout value for training (default: %(default)s)')
+    parser.add_argument('--no_batch_norm',
+                        action='store_false',
+                        help='Disable batch normalization (default: %(default)s)')
 
     # Environment configuration
     parser.add_argument('--debug',
@@ -175,10 +189,10 @@ if __name__ == '__main__':
 
     #  Another important point, you must provide an access to the random seed
     # to be able to fully reproduce an experiment
-    parser.add_argument('--random_seed',
+    parser.add_argument('--seed',
                         default=random.randint(0, sys.maxsize),
                         type=int,
-                        help='Value of random seed')
+                        help='Explicit value for dropout seed, otherwise random integer')
 
     # Data division
     parser.add_argument('--validation_fraction',

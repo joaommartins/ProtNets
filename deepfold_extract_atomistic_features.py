@@ -614,8 +614,6 @@ def fetch_and_extract(line, max_radius, n_features, bins_per_angstrom, add_seq_d
 if __name__ == '__main__':
     import joblib
 
-    from utils.str2bool import str2bool
-    
     import argparse
     parser = argparse.ArgumentParser()
 
@@ -642,9 +640,9 @@ if __name__ == '__main__':
                         help="Bins per Angstrom (default: %(default)s)")
     parser.add_argument("--n-proc", metavar="VAL", type=int, default=1,
                         help="Number of processes (default: %(default)s)")
-    parser.add_argument("--include-center", metavar="VAL", type=str2bool, default=False,
+    parser.add_argument("--include-center", action='store_true',
                         help="Include the center AA  (default: %(default)s)")
-    parser.add_argument("--add-seq-distance-feature", metavar="VAL", type=str2bool, default=False,
+    parser.add_argument("--add-seq-distance-feature", action='store_true',
                         help="Add the sequence distance as a feature  (default: %(default)s)")
 
     args = parser.parse_args()

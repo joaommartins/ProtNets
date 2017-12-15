@@ -38,6 +38,8 @@ class BaseModel(object):
         self.result_dir = self.config.result_dir
         self.max_iter = self.config.max_iter
         self.lr = self.config.lr
+        self.batch_normalization = self.config.no_batch_norm
+        self.dropout_seed = self.config.seed
         # self.dropout_keep_prob = self.config.dropout
 
         # Again, child Model should provide its own build_grap function
@@ -74,38 +76,44 @@ class BaseModel(object):
 
             with tf.variable_scope('train'):
                 if self.config.optimizer == 'Adam':
-                    self.train_step = tf.train.AdamOptimizer(self.learning_rate, beta1=0.9, beta2=0.999,
-                                                             epsilon=1e-08).minimize(self.loss,
-                                                                                     global_step=self.global_step_var)
+                    # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                    # with tf.control_dependencies(update_ops):
+                        self.train_step = tf.train.AdamOptimizer(self.learning_rate, beta1=0.9, beta2=0.999,
+                                                                 epsilon=1e-08)\
+                            .minimize(self.loss, global_step=self.global_step_var)
                 elif self.config.optimizer == 'Nesterov':
                     # FIXME: Harcoded for now
                     # self.steps_per_epoch = ceil(881000 / self.config.subbatch_max_size)
-                    self.steps_per_epoch = ceil(1740 / self.config.subbatch_max_size)
-                    epochs_per_decay = 5
-                    decay_steps = int(self.steps_per_epoch*epochs_per_decay)
-                    self.decayed_learning_rate = tf.train.exponential_decay(self.learning_rate,
-                                                                            self.global_step_var,
-                                                                            decay_rate=0.5,
-                                                                            decay_steps=decay_steps,
-                                                                            staircase=True)
-                    self.train_step = tf.train.MomentumOptimizer(self.decayed_learning_rate, momentum=0.9,
-                                                                 use_nesterov=True)\
-                        .minimize(self.loss, global_step=self.global_step_var)
-                    tf.summary.scalar('learning_rate', self.decayed_learning_rate)
+                    # self.steps_per_epoch = ceil(1740 / self.config.subbatch_max_size)
+                    # epochs_per_decay = 5
+                    # decay_steps = int(self.steps_per_epoch*epochs_per_decay)
+                    # self.decayed_learning_rate = tf.train.exponential_decay(self.learning_rate,
+                    #                                                         self.global_step_var,
+                    #                                                         decay_rate=0.5,
+                    #                                                         decay_steps=decay_steps,
+                    #                                                         staircase=True)
+                    # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                    # with tf.control_dependencies(update_ops):
+                        self.train_step = tf.train.MomentumOptimizer(self.learning_rate, momentum=0.5,
+                                                                     use_nesterov=True)\
+                            .minimize(self.loss, global_step=self.global_step_var)
+                    # tf.summary.scalar('learning_rate', self.)
                 elif self.config.optimizer == 'AdaDelta':
-                    self.train_step = tf.train.AdadeltaOptimizer(learning_rate=self.learning_rate, rho=0.95,
-                                                                 epsilon=1e-08)\
-                        .minimize(self.loss, global_step=self.global_step_var)
+                    # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                    # with tf.control_dependencies(update_ops):
+                        self.train_step = tf.train.AdadeltaOptimizer(learning_rate=self.learning_rate, rho=0.95,
+                                                                     epsilon=1e-08)\
+                            .minimize(self.loss, global_step=self.global_step_var)
 
-            if self.config.debug:
-                with tf.variable_scope('train_accuracy'):
-                    with tf.variable_scope('correct_prediction'):
-                        self.correct_prediction = tf.equal(tf.argmax(self.layers[-1]['output_layer'], 1),
-                                                           tf.argmax(self.train_labels, 1))
-                    with tf.variable_scope('accuracy'):
-                        self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
-                    tf.summary.scalar('accuracy', self.accuracy)
-                    tf.summary.histogram('accuracy', self.accuracy)
+            # if self.config.debug:
+            with tf.variable_scope('train_accuracy'):
+                with tf.variable_scope('correct_prediction'):
+                    self.correct_prediction = tf.equal(tf.argmax(self.layers[-1]['output_layer'], 1),
+                                                       tf.argmax(self.train_labels, 1))
+                with tf.variable_scope('accuracy'):
+                    self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
+                tf.summary.scalar('accuracy', self.accuracy)
+                tf.summary.histogram('accuracy', self.accuracy)
 
             with tf.variable_scope('validation_accuracy'):
                 with tf.variable_scope('correct_prediction'):
@@ -287,7 +295,8 @@ class BaseModel(object):
         initial = tf.truncated_normal(shape, stddev=self.config.initial_stddev, name='bias_{}'.format(layer_name))
         return tf.Variable(initial)
 
-    def nn_layer(self, input_tensor, output_dim, layer_name, dropout_keep_prob, act=tf.nn.relu, conv2fc=False):
+    def nn_layer(self, input_tensor, output_dim, layer_name, dropout_keep_prob, act=tf.nn.relu, conv2fc=False,
+                 batch_normalize=True):
         """Reusable code for making a simple neural net layer.
 
         It does a matrix multiply, bias add, and then uses relu to nonlinearize.
@@ -309,13 +318,20 @@ class BaseModel(object):
             with tf.variable_scope('Wx_plus_b'):
                 preactivate = tf.nn.bias_add(tf.matmul(input_tensor, weights), biases)
                 tf.summary.histogram('pre_activations', preactivate)
+            if batch_normalize:
+                with tf.variable_scope('batch_norm'):
+                    # layer_mean, layer_variance = tf.nn.moments(preactivate, axes=[0])
+                    # preactivate = tf.nn.batch_normalization(preactivate, layer_mean, layer_variance, offset=None,
+                    #                                         scale=None, variance_epsilon=1e-8)
+                    # tf.summary.histogram('batch_norm', preactivate)
+                    preactivate = self.batch_norm(preactivate, output_dim, self.phase_train, convolution=False)
             activations = act(preactivate, name='activation')
-            activations = tf.nn.dropout(activations, dropout_keep_prob)
+            activations = tf.nn.dropout(activations, dropout_keep_prob, seed=self.dropout_seed)
             tf.summary.histogram('activations', activations)
             return preactivate, activations, weights
 
     def conv_layer(self, input_tensor, filter_size_3d, output_depth, stride, layer_name, act=tf.nn.relu, auto_pad=True,
-                   explicit_pad=None):
+                   explicit_pad=None, batch_normalize=True):
         if auto_pad:
             input_tensor = self.circular_pad(input_tensor, filter_size_3d, use_r_padding=False)
         elif explicit_pad:
@@ -337,6 +353,13 @@ class BaseModel(object):
                 preactivate = tf.nn.bias_add(tf.nn.conv3d(input_tensor, filter=weights, strides=stride,
                                                           padding='VALID'), biases)
                 tf.summary.histogram('pre_activations', preactivate)
+            if batch_normalize:
+                with tf.variable_scope('batch_norm'):
+                    # layer_mean, layer_variance = tf.nn.moments(preactivate, axes=[0, 1, 2, 3])
+                    # preactivate = tf.nn.batch_normalization(preactivate, layer_mean, layer_variance, offset=None,
+                    #                                         scale=None, variance_epsilon=1e-8)
+                    # tf.summary.histogram('batch_norm', preactivate)
+                    preactivate = self.batch_norm(preactivate, output_depth, self.phase_train, convolution=True)
             activations = act(preactivate, name='activation')
             tf.summary.histogram('activations', activations)
             return activations
@@ -366,13 +389,64 @@ class BaseModel(object):
         padded_input = tf_pad_wrap(input, [(0, 0), (0, 0), (0, 0), (window_size_phi // 2, window_size_phi // 2), (0, 0)])
         return padded_input
 
+    def batch_norm(self, x, n_out, phase_train, convolution=False):
+        """
+        Batch normalization on convolutional maps.
+        Ref.: http://stackoverflow.com/questions/33949786/how-could-i-use-batch-normalization-in-tensorflow
+        Args:
+            x:           Tensor, 4D BHWD input maps
+            n_out:       integer, depth of input maps
+            phase_train: boolean tf.Varialbe, true indicates training phase
+            scope:       string, variable scope
+        Return:
+            normed:      batch-normalized maps
+        """
+        if convolution:
+            with tf.variable_scope('bn_convolution'):
+                beta = tf.Variable(tf.constant(0.0, shape=[n_out]),
+                                   name='beta', trainable=True)
+                gamma = tf.Variable(tf.constant(1.0, shape=[n_out]),
+                                    name='gamma', trainable=True)
+                batch_mean, batch_var = tf.nn.moments(x, [0, 1, 2, 3], name='moments')
+                ema = tf.train.ExponentialMovingAverage(decay=0.5)
+
+                def mean_var_with_update():
+                    ema_apply_op = ema.apply([batch_mean, batch_var])
+                    with tf.control_dependencies([ema_apply_op]):
+                        return tf.identity(batch_mean), tf.identity(batch_var)
+
+                mean, var = tf.cond(phase_train,
+                                    mean_var_with_update,
+                                    lambda: (ema.average(batch_mean), ema.average(batch_var)))
+                normed = tf.nn.batch_normalization(x, mean, var, beta, gamma, 1e-3)
+        else:
+            with tf.variable_scope('bn_nn'):
+                beta = tf.Variable(tf.constant(0.0, shape=[n_out]),
+                                   name='beta', trainable=True)
+                gamma = tf.Variable(tf.constant(1.0, shape=[n_out]),
+                                    name='gamma', trainable=True)
+                batch_mean, batch_var = tf.nn.moments(x, [0], name='moments')
+                ema = tf.train.ExponentialMovingAverage(decay=0.5)
+
+                def mean_var_with_update():
+                    ema_apply_op = ema.apply([batch_mean, batch_var])
+                    with tf.control_dependencies([ema_apply_op]):
+                        return tf.identity(batch_mean), tf.identity(batch_var)
+
+                mean, var = tf.cond(phase_train,
+                                    mean_var_with_update,
+                                    lambda: (ema.average(batch_mean), ema.average(batch_var)))
+                normed = tf.nn.batch_normalization(x, mean, var, beta, gamma, 1e-3)
+        return normed
+
     def learn_from_epoch(self, grid_matrix, labels, gradient_batch_sizes, validation_data):
         for sub_iteration, (index, length) in enumerate(
                 zip(np.cumsum(gradient_batch_sizes) - gradient_batch_sizes, gradient_batch_sizes)):
             grid_matrix_batch, labels_batch = get_batch(index, index + length, grid_matrix, labels)
             feed_dict = dict({self.input: grid_matrix_batch,
                               self.train_labels: labels_batch,
-                              self.dropout_keep_prob: self.config.dropout})
+                              self.dropout_keep_prob: self.config.dropout,
+                              self.phase_train: True})
 
             # run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
             # run_metadata = tf.RunMetadata()
@@ -409,7 +483,8 @@ class BaseModel(object):
 
             feed_dict = dict({self.input: grid_matrix_batch,
                               self.train_labels: labels_batch,
-                              self.dropout_keep_prob: 1.0})
+                              self.dropout_keep_prob: 1.0,
+                              self.phase_train: False})
 
             accuracy = self.sess.run(self.test_accuracy, feed_dict=feed_dict)
             losses.append(accuracy)
