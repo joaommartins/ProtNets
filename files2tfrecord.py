@@ -16,6 +16,7 @@ def _bytes_feature(value):
 def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
+
 if __name__ == '__main__':
     r, theta, phi, channels = [24, 76, 151, 2]
 
@@ -92,10 +93,12 @@ if __name__ == '__main__':
 
     more_data = True
     while more_data:
-        batch, gradient_batch_sizes = train_data.next(1000,
-                                                      subbatch_max_size=1000,
-                                                      enforce_protein_boundaries=False)
+        batch, gradient_batch_sizes = train_data.next(train_data.data_size(),
+                                                      subbatch_max_size=train_data.data_size(),
+                                                      enforce_protein_boundaries=False,
+                                                      sparse=True)
         more_data = (train_data.feature_index != 0)
+        print gradient_batch_sizes
         x = batch['high_res'].tostring()
         y = batch['model_output'].tostring()
 

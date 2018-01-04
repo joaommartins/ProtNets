@@ -79,7 +79,7 @@ class ProteinData:
     def forget_residue_features(self):
         pass
 
-    def get_residue_features(self, residue_index):
+    def get_residue_features(self, residue_index, sparse=False):
         return self.selected_features[residue_index]
         # r_value = []
         # for key in self.seq_features:
@@ -141,7 +141,7 @@ class ProteinGridData(ProteinData):
         self.selector_array = None
         self.indices_array = None
         
-    def get_residue_features(self, residue_index):
+    def get_residue_features(self, residue_index, sparse=False):
         '''Construct grid matrix from residue features'''
 
         # If selector_array has not been set, we fetch it here, but remember
@@ -163,7 +163,7 @@ class ProteinGridData(ProteinData):
                                                                    bins_per_angstrom=self.features["bins_per_angstrom"])
 
         #print "Overlapping indicies:", np.sum(np.sum(np.diff(np.sort(indices, axis=0), axis=0), axis=1) == 0)
-
+        # print self.features["residue_features"]
         start_index = 0
         for feature_name in self.features["residue_features"]:
 
@@ -182,7 +182,6 @@ class ProteinGridData(ProteinData):
             else :
                 full_feature = self.features[feature_name]
             feature = full_feature[selector]
-            # print feature
 
             end_index = start_index + feature.shape[1]
 
@@ -199,10 +198,11 @@ class ProteinGridData(ProteinData):
 
             #grid_matrix[indices[:,0], indices[:,1], indices[:,2], start_index:end_index] = feature
             grid_matrix[list(indices.T) + [slice(start_index,end_index)]] = feature
+            print indices.shape
 
             start_index += feature.shape[1]
 
-
+        print grid_matrix.shape
         # # Limit data to indices specified by selector
         # masses = self.masses_full[selector]
         # charges = self.charges_full[selector]
@@ -309,7 +309,7 @@ class BatchFactory:
         self.feature_index = 0
 
     def next(self, max_size=10, enforce_protein_boundaries=True, subbatch_max_size=None, increment_counter=True,
-             include_pdb_ids=False, return_single_proteins=False, shuffle=True):
+             include_pdb_ids=False, return_single_proteins=False, shuffle=True, sparse=False):
         '''Create next batch
         '''
 
@@ -366,7 +366,6 @@ class BatchFactory:
         residue_features = None
         pdb_ids = []
         for i in range(size):
-
             # Extract ProteinData object
             index = (self.feature_index+i) % len(self.features_expanded)
             pdb_id, residue_index = self.features_expanded[index]
@@ -392,9 +391,11 @@ class BatchFactory:
 
                 # Pre-fetch residue features
                 self.features[pdb_id][key].fetch_residue_features()
+                # print self.features[pdb_id][key]
 
                 # Get residue features
-                residue_features_value = self.features[pdb_id][key].get_residue_features(residue_index)
+                residue_features_value = self.features[pdb_id][key].get_residue_features(residue_index, sparse=False)
+                # print residue_features_value
                 if residue_features[key][i].dtype is not residue_features_value.dtype:
                     residue_features[key] = residue_features[key].astype(residue_features_value.dtype)
                 residue_features[key][i] = residue_features_value

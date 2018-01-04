@@ -30,11 +30,20 @@ class WouterCNN(BaseModel):
             # LAYER 0
             with tf.variable_scope('inputs'):
                 self.phase_train = tf.placeholder(tf.bool, name='phase_train')
-                self.input = tf.placeholder(tf.float32,
-                                            shape=[None] + self.input_shape,
-                                            name='input_values')
+                # self.input = tf.sparse_placeholder(tf.float32,
+                #                                    name='input_values')
+                # self.input = tf.sparse_tensor_to_dense(self.input)
+
+                self.indices = tf.placeholder(tf.int32)
+                self.values = tf.placeholder(tf.float32)
+                # self.start_shape = [self.config.batch_size] + self.input_shape
+                # self.shape = tf.placeholder_with_default(self.start_shape,
+                #                                          shape=5)
+                self.shape = [self.config.batch_size] + self.input_shape
+                self.input = tf.sparse_to_dense(self.indices, self.shape, self.values, validate_indices=False)
+
                 self.train_labels = tf.placeholder(tf.float32, shape=[None, self.output_size],
-                                                    name='input_labels')
+                                                   name='input_labels')
                 self.dropout_keep_prob = tf.placeholder(tf.float32)
                 layer = self.input
                 self.layers.append({})

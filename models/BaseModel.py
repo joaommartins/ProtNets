@@ -10,6 +10,7 @@ import tensorflow as tf
 from math import ceil
 from utils.padding import tf_pad_wrap
 from utils.batch_factory import get_batch
+from utils.SparseGenerator import SparseGenerator
 
 
 class BaseModel(object):
@@ -35,6 +36,7 @@ class BaseModel(object):
 
         # All models share some basics hyper parameters, this is the section where we
         # copy them into the model
+        self.sparse = self.config.sparse
         self.result_dir = self.config.result_dir
         self.max_iter = self.config.max_iter
         self.lr = self.config.lr
@@ -191,37 +193,25 @@ class BaseModel(object):
         starting_epoch = self.sess.run(self.epoch)
         for epoch_id in range(starting_epoch, self.max_iter):
             epoch_id = self.sess.run(self.increment_epoch)
-            more_data = True
 
             print('Epoch:\t{}'.format(epoch_id))
-            while more_data:
-                batch, gradient_batch_sizes = train_data.next(self.config.max_batch_size,
-                                                              subbatch_max_size=self.config.subbatch_max_size,
-                                                              enforce_protein_boundaries=False)
-                more_data = (train_data.feature_index != 0)
-
-                grid_matrix = batch["high_res"]
-                labels = batch["model_output"]
-                self.learn_from_epoch(grid_matrix, labels, gradient_batch_sizes, validation_data)
+            while train_data.hold():
+                indices, values, shape, hots_index = train_data.next(self.config.batch_size)
+                self.learn_from_batch(indices, values, hots_index, validation_data)
 
             self.validate(validation_data)
 
             # If you don't want to save during training, you can just pass a negative number
             if save_every > 0 and epoch_id % save_every == 0:  # FIXME: Should be 0, set at negative for no saving
                 self.save(epoch_id)
+            train_data.restart()
 
     def validate(self, validation_data, partial=False):
         errors = []
-        more_data = True
-        while more_data:
-            batch, gradient_batch_sizes = validation_data.next(self.config.max_batch_size,
-                                                               subbatch_max_size=self.config.subbatch_max_size,
-                                                               enforce_protein_boundaries=False)
-            more_data = (validation_data.feature_index != 0)
+        while validation_data.hold():
+            indices, values, shape, hots_index = validation_data.next(self.config.batch_size)
 
-            grid_matrix = batch["high_res"]
-            labels = batch["model_output"]
-            batch_errors = self.eval_from_epoch(grid_matrix, labels, gradient_batch_sizes)
+            batch_errors = self.eval_from_batch(indices, values, hots_index)
             errors += batch_errors
         feed_dict = dict({self.average_pl: sum(errors)/len(errors)})
         summary_str, epoch, global_step = self.sess.run([self.average_per_epoch, self.epoch, self.global_step_var],
@@ -231,6 +221,7 @@ class BaseModel(object):
         else:
             self.test_sw.add_summary(summary_str, epoch)
             print('Epoch {} validation accuracy: {:.2f}%'.format(epoch, (sum(errors) / len(errors)) * 100))
+        validation_data.restart()
 
     def test(self, test_data):
         accuracy = []
@@ -263,11 +254,11 @@ class BaseModel(object):
         pass
 
     def print_layer(self, layers, idx, name):
-
         if name == 'W':
             size = int(np.prod(layers[-1][name].get_shape()))
         else:
             size = int(np.prod(layers[-1][name].get_shape()[1:]))
+
 
         print("layer {} (high res) - {:>15}: {} [size {:,.0f}]" \
               "".format(len(layers), name, layers[idx][name].get_shape(), size))
@@ -439,53 +430,44 @@ class BaseModel(object):
                 normed = tf.nn.batch_normalization(x, mean, var, beta, gamma, 1e-3)
         return normed
 
-    def learn_from_epoch(self, grid_matrix, labels, gradient_batch_sizes, validation_data):
-        for sub_iteration, (index, length) in enumerate(
-                zip(np.cumsum(gradient_batch_sizes) - gradient_batch_sizes, gradient_batch_sizes)):
-            grid_matrix_batch, labels_batch = get_batch(index, index + length, grid_matrix, labels)
-            feed_dict = dict({self.input: grid_matrix_batch,
-                              self.train_labels: labels_batch,
-                              self.dropout_keep_prob: self.config.dropout,
-                              self.phase_train: True})
+    def learn_from_batch(self, indices, values, hots_index, validation_data):
+        feed_dict = dict({self.indices: indices,
+                          self.values: values,
+                          self.train_labels: hots_index,
+                          self.dropout_keep_prob: self.config.dropout,
+                          self.phase_train: True})
+        # feed_dict = dict({self.input: (indices, values, shape),
+        #                   self.train_labels: hots_index,
+        #                   self.dropout_keep_prob: self.config.dropout,
+        #                   self.phase_train: True})
 
-            # run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-            # run_metadata = tf.RunMetadata()
-            # _, loss_value, summary, global_step, accuracy = self.sess.run(
-            #     [self.train_step, self.loss, self.merged_summaries, self.global_step_var, self.accuracy],
-            #     feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
-            # self.sw.add_run_metadata(summary, 'Train step {}'.format(global_step), global_step=global_step)
-            # self.sw.add_summary(summary, global_step=global_step)
-
-            if self.config.debug:
-                _, loss_value, summary, global_step, accuracy = self.sess.run(
-                    [self.train_step, self.loss, self.merged_summaries, self.global_step_var,
-                     self.accuracy], feed_dict=feed_dict)
-                self.sw.add_summary(summary, global_step=global_step)
+        if self.config.debug:
+            _, loss_value, summary, global_step, accuracy = self.sess.run(
+                [self.train_step, self.loss, self.merged_summaries, self.global_step_var,
+                 self.accuracy], feed_dict=feed_dict)
+            self.sw.add_summary(summary, global_step=global_step)
+            print('Loss step {}: {:.2f} [Sub-batch error: {:.0f}%]'.format(global_step, loss_value,
+                                                                           100 - (100 * accuracy)))
+        else:
+            _, loss_value, summary, global_step = self.sess.run(
+                [self.train_step, self.loss, self.merged_summaries, self.global_step_var], feed_dict=feed_dict)
+            self.sw.add_summary(summary, global_step=global_step)
+            if global_step % 5000 == 0 and global_step != 0:
+                accuracy = self.sess.run(self.accuracy, feed_dict=feed_dict)
                 print('Loss step {}: {:.2f} [Sub-batch error: {:.0f}%]'.format(global_step, loss_value,
                                                                                100 - (100 * accuracy)))
+                self.validate(validation_data, partial=True)
             else:
-                _, loss_value, summary, global_step = self.sess.run(
-                    [self.train_step, self.loss, self.merged_summaries, self.global_step_var], feed_dict=feed_dict)
-                self.sw.add_summary(summary, global_step=global_step)
-                if global_step % 5000 == 0 and global_step != 0:
-                    accuracy = self.sess.run(self.accuracy, feed_dict=feed_dict)
-                    print('Loss step {}: {:.2f} [Sub-batch error: {:.0f}%]'.format(global_step, loss_value,
-                                                                                   100 - (100 * accuracy)))
-                    self.validate(validation_data, partial=True)
-                else:
-                    print('Loss step {}: {:.2f}'.format(global_step, loss_value))
+                print('Loss step {}: {:.2f}'.format(global_step, loss_value))
 
-    def eval_from_epoch(self, grid_matrix, labels, gradient_batch_sizes):
+    def eval_from_batch(self, indices, values, hots_index):
         losses = []
-        for sub_iteration, (index, length) in enumerate(
-                zip(np.cumsum(gradient_batch_sizes) - gradient_batch_sizes, gradient_batch_sizes)):
-            grid_matrix_batch, labels_batch = get_batch(index, index + length, grid_matrix, labels)
+        feed_dict = dict({self.indices: indices,
+                          self.values: values,
+                          self.train_labels: hots_index,
+                          self.dropout_keep_prob: 1.0,
+                          self.phase_train: False})
 
-            feed_dict = dict({self.input: grid_matrix_batch,
-                              self.train_labels: labels_batch,
-                              self.dropout_keep_prob: 1.0,
-                              self.phase_train: False})
-
-            accuracy = self.sess.run(self.test_accuracy, feed_dict=feed_dict)
-            losses.append(accuracy)
+        accuracy = self.sess.run(self.test_accuracy, feed_dict=feed_dict)
+        losses.append(accuracy)
         return losses

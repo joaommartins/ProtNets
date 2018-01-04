@@ -8,6 +8,7 @@ import json
 import time
 import random
 from utils.batch_factory import BatchFactory
+from utils.SparseGenerator import SparseGenerator
 import glob
 import argparse
 
@@ -46,38 +47,18 @@ def main(_):
         shuffle_opt = True
 
     if not config.mode == 'infer' and not config.mode == 'test':
-        train_data = BatchFactory()
-        train_data.add_data_set("high_res",
-                                high_res_protein_feature_filenames[:train_end],
-                                high_res_grid_feature_filenames[:train_end],
-                                duplicate_origin=config.duplicate_origin,
-                                shuffle=shuffle_opt)
-        train_data.add_data_set("model_output",
-                                high_res_protein_feature_filenames[:train_end],
-                                key_filter=[config.data_type + "_one_hot"],
-                                shuffle=shuffle_opt)
+        train_data = SparseGenerator()
+        train_data.load_data(high_res_protein_feature_filenames[:train_end],
+                             high_res_grid_feature_filenames[:train_end])
 
-        validation_data = BatchFactory()
-        validation_data.add_data_set("high_res",
-                                     high_res_protein_feature_filenames[validation_start:validation_end],
-                                     high_res_grid_feature_filenames[validation_start:validation_end],
-                                     duplicate_origin=config.duplicate_origin,
-                                     shuffle=shuffle_opt)
-        validation_data.add_data_set("model_output",
-                                     high_res_protein_feature_filenames[validation_start:validation_end],
-                                     key_filter=[config.data_type + "_one_hot"],
-                                     shuffle=shuffle_opt)
+        validation_data = SparseGenerator()
+        validation_data.load_data(high_res_protein_feature_filenames[validation_start:validation_end],
+                                  high_res_grid_feature_filenames[validation_start:validation_end])
+
     elif config.mode == 'test':
-        test_data = BatchFactory()
-        test_data.add_data_set("high_res",
-                               high_res_protein_feature_filenames[validation_end:],
-                               high_res_grid_feature_filenames[validation_end:],
-                               duplicate_origin=config.duplicate_origin,
-                               shuffle=shuffle_opt)
-        test_data.add_data_set("model_output",
-                               high_res_protein_feature_filenames[validation_end:],
-                               key_filter=[config.data_type + "_one_hot"],
-                               shuffle=shuffle_opt)
+        test_data = SparseGenerator()
+        test_data.load_data(high_res_protein_feature_filenames[validation_end:],
+                            high_res_grid_feature_filenames[validation_end:])
     if config.fullsearch:
         pass
         # Some code for HP search ...
@@ -106,7 +87,9 @@ if __name__ == '__main__':
 \t\t|                                     |
 \t\t+-------------------------------------+
 ''', formatter_class=argparse.RawDescriptionHelpFormatter)
-
+    parser.add_argument('--sparse',
+                        action='store_true',
+                        help='Turns on sparse representation for data input (default: %(default)s)')
     parser.add_argument('--fullsearch',
                         action='store_true',
                         help='Perform a full search of hyperparameter space ex:(hyperband > lr search > hyperband '
@@ -214,6 +197,9 @@ if __name__ == '__main__':
     parser.add_argument("--max-batch-size",
                         help="Maximum batch size used during training (default: %(default)s)", type=int, default=1000)
     parser.add_argument("--subbatch-max-size",
+                        help="Maximum batch size used for gradient calculation (default: %(default)s)", type=int,
+                        default=25)
+    parser.add_argument("--batch-size",
                         help="Maximum batch size used for gradient calculation (default: %(default)s)", type=int,
                         default=25)
     config = parser.parse_args()
