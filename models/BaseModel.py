@@ -59,8 +59,10 @@ class BaseModel(object):
             self.learning_rate = self.config.lr
             with tf.variable_scope('validation_average'):
                 self.average_pl = tf.placeholder(tf.float32)
-                self.average_summary = tf.summary.scalar("epoch_average_accuracy", self.average_pl,
+                self.epoch_validation = tf.summary.scalar("epoch_average_accuracy", self.average_pl,
                                                          collections=['accuracy_per_epoch'])
+                self.step_validation = tf.summary.scalar("validation_average_accuracy", self.average_pl,
+                                                         collections=['accuracy_per_steps'])
             # Entropy and loss for the models
             with tf.variable_scope('entropy'):
                 self.entropy = tf.nn.softmax_cross_entropy_with_logits(logits=self.layers[-1]['preactivation'],
@@ -114,8 +116,8 @@ class BaseModel(object):
                                                        tf.argmax(self.train_labels, 1))
                 with tf.variable_scope('accuracy'):
                     self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
-                tf.summary.scalar('accuracy', self.accuracy)
-                tf.summary.histogram('accuracy', self.accuracy)
+                self.train_accuracy = tf.summary.scalar('train_accuracy', self.accuracy, collections=['train_accuracy'])
+                # tf.summary.histogram('accuracy', self.accuracy, collections=['train_accuracy'])
 
             with tf.variable_scope('validation_accuracy'):
                 with tf.variable_scope('correct_prediction'):
@@ -128,8 +130,9 @@ class BaseModel(object):
             print("Number of parameters: ",
                   sum(reduce(lambda x, y: x * y, v.get_shape().as_list()) for v in tf.trainable_variables()))
 
-            self.merged_summaries = tf.summary.merge_all()
-            self.average_per_epoch = tf.summary.merge_all(key='accuracy_per_epoch')
+            self.merged_summaries = tf.summary.merge_all(key=tf.GraphKeys.SUMMARIES)
+            # self.train_accuracy = tf.summary.merge_all(key='train_accuracy')
+            # self.average_per_epoch = tf.summary.merge_all(key='accuracy_per_epoch')
             # self.init_op = tf.global_variables_initializer()
             self.saver = tf.train.Saver(
                 max_to_keep=1,
@@ -214,11 +217,15 @@ class BaseModel(object):
             batch_errors = self.eval_from_batch(indices, values, hots_index)
             errors += batch_errors
         feed_dict = dict({self.average_pl: sum(errors)/len(errors)})
-        summary_str, epoch, global_step = self.sess.run([self.average_per_epoch, self.epoch, self.global_step_var],
-                                                        feed_dict=feed_dict)
+
         if partial:
+            summary_str, global_step = self.sess.run([self.step_validation, self.global_step_var],
+                                                     feed_dict=feed_dict)
+            self.test_sw.add_summary(summary_str, global_step)
             print('Step {} validation accuracy: {:.2f}%'.format(global_step, (sum(errors) / len(errors)) * 100))
         else:
+            summary_str, epoch, global_step = self.sess.run([self.epoch_validation, self.epoch, self.global_step_var],
+                                                            feed_dict=feed_dict)
             self.test_sw.add_summary(summary_str, epoch)
             print('Epoch {} validation accuracy: {:.2f}%'.format(epoch, (sum(errors) / len(errors)) * 100))
         validation_data.restart()
@@ -264,16 +271,17 @@ class BaseModel(object):
               "".format(len(layers), name, layers[idx][name].get_shape(), size))
 
     def variable_summaries(self, var):
-        """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
-        with tf.variable_scope('summaries'):
-            mean = tf.reduce_mean(var)
-            tf.summary.scalar('mean', mean)
-            with tf.variable_scope('stddev'):
-                stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-            tf.summary.scalar('stddev', stddev)
-            tf.summary.scalar('max', tf.reduce_max(var))
-            tf.summary.scalar('min', tf.reduce_min(var))
-            tf.summary.histogram('histogram', var)
+        pass
+        # """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+        # with tf.variable_scope('summaries'):
+        #     mean = tf.reduce_mean(var)
+        #     tf.summary.scalar('mean', mean)
+        #     with tf.variable_scope('stddev'):
+        #         stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+        #     tf.summary.scalar('stddev', stddev)
+        #     tf.summary.scalar('max', tf.reduce_max(var))
+        #     tf.summary.scalar('min', tf.reduce_min(var))
+        #     tf.summary.histogram('histogram', var)
 
     def weight_variable(self, shape, layer_name):
         """Create a weight variable with appropriate initialization."""
@@ -308,17 +316,18 @@ class BaseModel(object):
                 self.variable_summaries(biases)
             with tf.variable_scope('Wx_plus_b'):
                 preactivate = tf.nn.bias_add(tf.matmul(input_tensor, weights), biases)
-                tf.summary.histogram('pre_activations', preactivate)
+                # tf.summary.histogram('pre_activations', preactivate)
             if batch_normalize:
                 with tf.variable_scope('batch_norm'):
                     # layer_mean, layer_variance = tf.nn.moments(preactivate, axes=[0])
                     # preactivate = tf.nn.batch_normalization(preactivate, layer_mean, layer_variance, offset=None,
                     #                                         scale=None, variance_epsilon=1e-8)
                     # tf.summary.histogram('batch_norm', preactivate)
-                    preactivate = self.batch_norm(preactivate, output_dim, self.phase_train, convolution=False)
+                    preactivate = self.batch_norm(preactivate, output_dim, layer_name, self.phase_train,
+                                                  convolution=False)
             activations = act(preactivate, name='activation')
             activations = tf.nn.dropout(activations, dropout_keep_prob, seed=self.dropout_seed)
-            tf.summary.histogram('activations', activations)
+            # tf.summary.histogram('activations', activations)
             return preactivate, activations, weights
 
     def conv_layer(self, input_tensor, filter_size_3d, output_depth, stride, layer_name, act=tf.nn.relu, auto_pad=True,
@@ -343,16 +352,17 @@ class BaseModel(object):
             with tf.variable_scope('convolution'):
                 preactivate = tf.nn.bias_add(tf.nn.conv3d(input_tensor, filter=weights, strides=stride,
                                                           padding='VALID'), biases)
-                tf.summary.histogram('pre_activations', preactivate)
+                # tf.summary.histogram('pre_activations', preactivate)
             if batch_normalize:
                 with tf.variable_scope('batch_norm'):
                     # layer_mean, layer_variance = tf.nn.moments(preactivate, axes=[0, 1, 2, 3])
                     # preactivate = tf.nn.batch_normalization(preactivate, layer_mean, layer_variance, offset=None,
                     #                                         scale=None, variance_epsilon=1e-8)
                     # tf.summary.histogram('batch_norm', preactivate)
-                    preactivate = self.batch_norm(preactivate, output_depth, self.phase_train, convolution=True)
+                    preactivate = self.batch_norm(preactivate, output_depth, layer_name, self.phase_train,
+                                                  convolution=True)
             activations = act(preactivate, name='activation')
-            tf.summary.histogram('activations', activations)
+            # tf.summary.histogram('activations', activations)
             return activations
 
     def pool_layer(self, input_tensor, ksize, stride, layer_name, pool_type=tf.nn.avg_pool3d, padded=True):
@@ -362,7 +372,7 @@ class BaseModel(object):
                                            [(0, 0), (0, 0), (0, 0), (ksize[3] // 2, ksize[3] // 2), (0, 0)])
             pool = pool_type(input_tensor, ksize=ksize, strides=stride, padding='VALID',
                              name='pool_{}'.format(layer_name))
-            tf.summary.histogram('pooling', pool)
+            # tf.summary.histogram('pooling', pool)
             return pool
 
     def circular_pad(self, input_tensor, filter_size_3d, use_r_padding=True):
@@ -380,7 +390,7 @@ class BaseModel(object):
         padded_input = tf_pad_wrap(input, [(0, 0), (0, 0), (0, 0), (window_size_phi // 2, window_size_phi // 2), (0, 0)])
         return padded_input
 
-    def batch_norm(self, x, n_out, phase_train, convolution=False):
+    def batch_norm(self, x, n_out, layer, phase_train, convolution=False):
         """
         Batch normalization on convolutional maps.
         Ref.: http://stackoverflow.com/questions/33949786/how-could-i-use-batch-normalization-in-tensorflow
@@ -393,7 +403,7 @@ class BaseModel(object):
             normed:      batch-normalized maps
         """
         if convolution:
-            with tf.variable_scope('bn_convolution'):
+            with tf.variable_scope('{}_bn_convolution'.format(layer)):
                 beta = tf.Variable(tf.constant(0.0, shape=[n_out]),
                                    name='beta', trainable=True)
                 gamma = tf.Variable(tf.constant(1.0, shape=[n_out]),
@@ -411,7 +421,7 @@ class BaseModel(object):
                                     lambda: (ema.average(batch_mean), ema.average(batch_var)))
                 normed = tf.nn.batch_normalization(x, mean, var, beta, gamma, 1e-3)
         else:
-            with tf.variable_scope('bn_nn'):
+            with tf.variable_scope('{}_bn_nn'.format(layer)):
                 beta = tf.Variable(tf.constant(0.0, shape=[n_out]),
                                    name='beta', trainable=True)
                 gamma = tf.Variable(tf.constant(1.0, shape=[n_out]),
@@ -449,14 +459,24 @@ class BaseModel(object):
             print('Loss step {}: {:.2f} [Sub-batch error: {:.0f}%]'.format(global_step, loss_value,
                                                                            100 - (100 * accuracy)))
         else:
+            # _, loss_value, global_step = self.sess.run(
+            #     [self.train_step, self.loss, self.global_step_var], feed_dict=feed_dict)
             _, loss_value, summary, global_step = self.sess.run(
                 [self.train_step, self.loss, self.merged_summaries, self.global_step_var], feed_dict=feed_dict)
             self.sw.add_summary(summary, global_step=global_step)
+
             if global_step % 5000 == 0 and global_step != 0:
-                accuracy = self.sess.run(self.accuracy, feed_dict=feed_dict)
+                accuracy, train_accuracy = self.sess.run([self.accuracy, self.train_accuracy], feed_dict=feed_dict)
                 print('Loss step {}: {:.2f} [Sub-batch error: {:.0f}%]'.format(global_step, loss_value,
                                                                                100 - (100 * accuracy)))
+                self.sw.add_summary(train_accuracy, global_step=global_step)
                 self.validate(validation_data, partial=True)
+            elif global_step % 100 == 0 and global_step != 0:
+                accuracy, summary = self.sess.run([self.accuracy, self.train_accuracy], feed_dict=feed_dict)
+                self.sw.add_summary(summary, global_step=global_step)
+                print('Loss step {}: {:.2f} [Sub-batch error: {:.0f}%]'.format(global_step, loss_value,
+                                                                               100 - (100 * accuracy)))
+
             else:
                 print('Loss step {}: {:.2f}'.format(global_step, loss_value))
 
