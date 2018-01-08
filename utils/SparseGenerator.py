@@ -1,9 +1,22 @@
-import numpy as np
+# -*- coding: utf-8 -*-
+# Copyright (c) 2018 João Martins
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
 
+import numpy as np
 
 class SparseGenerator:
     def __init__(self):
-        self.subbatch_size = 25
         self._current_batch = 0
         self._data = []
         self.grid_indexes = []
@@ -11,8 +24,6 @@ class SparseGenerator:
         self.masses = []
         self.aa_one_hot = []
         self._hold = True
-
-        # self.shape = [self.subbatch_size, 24, 76, 151, 2]
 
     def load_data(self, protein_feature, grid_feature):
         for index, prot in enumerate(protein_feature):
@@ -30,10 +41,6 @@ class SparseGenerator:
                 self.charges.append(charges)
                 self.masses.append(masses)
                 self.aa_one_hot.append(aa_one_hot)
-                # self._data.append([[np.insert(grid_indexes, 3, 0, axis=1), np.insert(grid_indexes, 3, 1, axis=1)],
-                #                    charges, masses, aa_one_hot])
-        # self._data = np.array(self._data)
-        # self.grid_indexes = np.array(self.grid_indexes)
 
     def next(self, batch_size):
         self._current_batch += 1
@@ -46,9 +53,7 @@ class SparseGenerator:
                                                 np.insert(x, 4, 1, axis=1))) for ind, x in enumerate(indices)])
             values = np.array([np.concatenate((self.masses[start:end][index], self.charges[start:end][index]))
                                for index, val in enumerate(self.masses[start:end])])
-            # shape = np.array([batch_size, 24, 76, 151, 2])
             shape = np.array([end-start, 24, 76, 151, 2])
-            # hots_index = np.array([[ind, np.argmax(x)] for ind, x in enumerate(self.aa_one_hot[start:end])])
             hots = np.array(self.aa_one_hot[start:end])
             return np.concatenate(indices), np.concatenate(values).ravel(), shape, hots
         else:
@@ -59,7 +64,6 @@ class SparseGenerator:
             values = np.array([np.concatenate((self.masses[start:end][index], self.charges[start:end][index]))
                                for index, val in enumerate(self.masses[start:end])])
             shape = np.array([end-start, 24, 76, 151, 2])
-            # hots_index = np.array([[ind, np.argmax(x)] for ind, x in enumerate(self.aa_one_hot[start:end])])
             hots = np.array(self.aa_one_hot[start:end])
             return np.concatenate(indices), np.concatenate(values).ravel(), shape, hots
 

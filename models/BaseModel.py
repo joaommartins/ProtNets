@@ -1,3 +1,18 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2018 João Martins
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -7,10 +22,7 @@ import copy
 import json
 import numpy as np
 import tensorflow as tf
-from math import ceil
 from utils.padding import tf_pad_wrap
-from utils.batch_factory import get_batch
-from utils.SparseGenerator import SparseGenerator
 
 
 class BaseModel(object):
@@ -80,31 +92,14 @@ class BaseModel(object):
 
             with tf.variable_scope('train'):
                 if self.config.optimizer == 'Adam':
-                    # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                    # with tf.control_dependencies(update_ops):
                         self.train_step = tf.train.AdamOptimizer(self.learning_rate, beta1=0.9, beta2=0.999,
                                                                  epsilon=1e-08)\
                             .minimize(self.loss, global_step=self.global_step_var)
                 elif self.config.optimizer == 'Nesterov':
-                    # FIXME: Harcoded for now
-                    # self.steps_per_epoch = ceil(881000 / self.config.subbatch_max_size)
-                    # self.steps_per_epoch = ceil(1740 / self.config.subbatch_max_size)
-                    # epochs_per_decay = 5
-                    # decay_steps = int(self.steps_per_epoch*epochs_per_decay)
-                    # self.decayed_learning_rate = tf.train.exponential_decay(self.learning_rate,
-                    #                                                         self.global_step_var,
-                    #                                                         decay_rate=0.5,
-                    #                                                         decay_steps=decay_steps,
-                    #                                                         staircase=True)
-                    # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                    # with tf.control_dependencies(update_ops):
                         self.train_step = tf.train.MomentumOptimizer(self.learning_rate, momentum=0.5,
                                                                      use_nesterov=True)\
                             .minimize(self.loss, global_step=self.global_step_var)
-                    # tf.summary.scalar('learning_rate', self.)
                 elif self.config.optimizer == 'AdaDelta':
-                    # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                    # with tf.control_dependencies(update_ops):
                         self.train_step = tf.train.AdadeltaOptimizer(learning_rate=self.learning_rate, rho=0.95,
                                                                      epsilon=1e-08)\
                             .minimize(self.loss, global_step=self.global_step_var)
@@ -117,7 +112,6 @@ class BaseModel(object):
                 with tf.variable_scope('accuracy'):
                     self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
                 self.train_accuracy = tf.summary.scalar('train_accuracy', self.accuracy, collections=['train_accuracy'])
-                # tf.summary.histogram('accuracy', self.accuracy, collections=['train_accuracy'])
 
             with tf.variable_scope('validation_accuracy'):
                 with tf.variable_scope('correct_prediction'):
@@ -131,9 +125,6 @@ class BaseModel(object):
                   sum(reduce(lambda x, y: x * y, v.get_shape().as_list()) for v in tf.trainable_variables()))
 
             self.merged_summaries = tf.summary.merge_all(key=tf.GraphKeys.SUMMARIES)
-            # self.train_accuracy = tf.summary.merge_all(key='train_accuracy')
-            # self.average_per_epoch = tf.summary.merge_all(key='accuracy_per_epoch')
-            # self.init_op = tf.global_variables_initializer()
             self.saver = tf.train.Saver(
                 max_to_keep=1,
             )
@@ -145,7 +136,6 @@ class BaseModel(object):
         gpu_options = tf.GPUOptions(allow_growth=True)
         sessConfig = tf.ConfigProto(gpu_options=gpu_options)
         self.sess = tf.Session(config=sessConfig, graph=self.graph)
-        # self.sess = tf.train.Supervisor(logdir='log', graph=self.graph)
         self.sw = tf.summary.FileWriter(os.path.join(self.result_dir, 'train_summary'), self.sess.graph)
         self.test_sw = tf.summary.FileWriter(os.path.join(self.result_dir, 'test_summary'), self.sess.graph)
 
@@ -265,8 +255,6 @@ class BaseModel(object):
             size = int(np.prod(layers[-1][name].get_shape()))
         else:
             size = int(np.prod(layers[-1][name].get_shape()[1:]))
-
-
         print("layer {} (high res) - {:>15}: {} [size {:,.0f}]" \
               "".format(len(layers), name, layers[idx][name].get_shape(), size))
 
