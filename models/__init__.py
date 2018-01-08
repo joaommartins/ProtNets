@@ -15,15 +15,12 @@
 
 from models.BaseModel import BaseModel
 from models.FC3_NN import FC3_NN
-from models.CNN import CNN
 from models.NonPaddedCNN import NonPaddedCNN
-from models.WouterCNN import WouterCNN
+from models.CNN import CNN
 
 available_models = [
-    "BaseModel",
-    "WouterCNN",
-    "FC3_NN",
     "CNN",
+    "FC3_NN",
     "NonPaddedCNN"
 ]
 

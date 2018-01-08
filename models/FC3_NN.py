@@ -24,91 +24,68 @@ from utils.batch_factory import get_batch
 
 
 class FC3_NN(BaseModel):
-
-    def set_agent_props(self):
-        self.layers = []
+    def _set_agent_props(self):
         if self.config.data_type == 'aa':
             self.output_size = 21
         else:
             self.output_size = 3
         self.input_shape = [24, 76, 151, 2]
 
-    def get_best_config(self):
+    def _get_best_config(self):
         return {}
 
     @staticmethod
-    def get_random_config(fixed_params={}):
+    def _get_random_config(fixed_params={}):
         pass
 
-    def build_graph(self):
+    def _build_graph(self):
         with self.graph.as_default():
-
             # LAYER 0
-            input_scope = tf.VariableScope(reuse=False, name="inputs")
-            with tf.variable_scope(input_scope):
-                self.input = tf.placeholder(tf.float32,
-                                            shape=[self.config.subbatch_max_size] + self.input_shape,
-                                            name='input_values')
-                self.train_labels = tf.placeholder(tf.int64, shape=[self.config.subbatch_max_size, self.output_size],
-                                                    name='input_labels')
-                self.input_layer = tf.reshape(self.input, (self.config.subbatch_max_size, np.prod(self.input_shape)))
-                self.layers.append(self.input_layer)
-                self.print_layer(self.layers, -1, 'Input layer')
+            with tf.variable_scope('inputs'):
+                self.phase_train = tf.placeholder(tf.bool, name='phase_train')
 
-            # LAYER 0
-            self.layer1 = self.nn_layer(self.input_layer, self.input_layer.get_shape().as_list()[1], 128, 'layer1')
-            self.layers.append(self.layer1)
-            self.print_layer(self.layers, -1, 'layer1 RELU')
+                self.indices = tf.placeholder(tf.int32)
+                self.values = tf.placeholder(tf.float32)
+                self.shape = [self.config.batch_size] + self.input_shape
+                self.input = tf.sparse_to_dense(self.indices, self.shape, self.values, validate_indices=False)
 
-            # LAYER 1
-            self.layer2 = self.nn_layer(self.layer1, self.layer1.get_shape().as_list()[1], 64, 'layer2')
-            self.layers.append(self.layer2)
-            self.print_layer(self.layers, -1, 'layer2 RELU')
+                self.train_labels = tf.placeholder(tf.float32, shape=[None, self.output_size],
+                                                   name='input_labels')
+                self.dropout_keep_prob = tf.placeholder(tf.float32)
+                layer = self.input
+                self.layers.append({})
+                self.layers[-1]['input'] = layer
+                self.print_layer(self.layers, -1, 'input')
 
-            # OUTPUT LAYER
-            self.output_layer = self.nn_layer(self.layer2, self.layer2.get_shape().as_list()[1], self.output_size,
-                                        'output_layer', act=tf.nn.softmax)
-            self.layers.append(self.output_layer)
-            self.print_layer(self.layers, -1, 'Output Layer')
+                # FC1
+            self.layers.append({})
+            _, layer, weight = self.nn_layer(layer, 2048, 'FC1', dropout_keep_prob=self.dropout_keep_prob,
+                                             conv2fc=True
+                                             , batch_normalize=self.batch_normalization)
+            self.layers[-1]['W'] = weight
+            self.print_layer(self.layers, -1, 'W')
+            self.layers[-1]['FC1'] = layer
+            self.print_layer(self.layers, -1, 'FC1')
+
+            # FC2
+            self.layers.append({})
+            _, layer, weight = self.nn_layer(layer, 2048, 'FC2', dropout_keep_prob=self.dropout_keep_prob,
+                                             batch_normalize=self.batch_normalization)
+            self.layers[-1]['W'] = weight
+            self.print_layer(self.layers, -1, 'W')
+            self.layers[-1]['FC2'] = layer
+            self.print_layer(self.layers, -1, 'FC2')
+
+            # OUTPUT LAYER (NAME MUST BE "output_layer" for loss to work)
+            self.layers.append({})
+            preactivated, output_layer, weight = self.nn_layer(layer, self.output_size, 'output_layer',
+                                                               dropout_keep_prob=1.0, act=tf.nn.softmax,
+                                                               batch_normalize=self.batch_norm)
+            self.layers[-1]['preactivation'] = preactivated
+            self.layers[-1]['W'] = weight
+            self.print_layer(self.layers, -1, 'W')
+            self.layers[-1]['output_layer'] = output_layer
+            self.print_layer(self.layers, -1, 'output_layer')
 
     def infer(self):
         pass
-
-    # def learn_from_epoch(self, grid_matrix, labels, gradient_batch_sizes):
-    #     for sub_iteration, (index, length) in enumerate(
-    #             zip(np.cumsum(gradient_batch_sizes) - gradient_batch_sizes, gradient_batch_sizes)):
-    #         grid_matrix_batch, labels_batch = get_batch(index, index + length, grid_matrix, labels)
-    #
-    #
-    #         # feed_dict = dict({self.x_high_res: grid_matrix_batch,
-    #         #                   self.y: labels_batch,
-    #         #                   self.dropout_keep_prob: dropout_keep_prob})
-    #         feed_dict = dict({self.input: grid_matrix_batch,
-    #                           self.train_labels: labels_batch})
-    #
-    #         # print self.sess.run([self.train_step, self.loss], feed_dict=feed_dict)
-    #         accuracy = self.sess.run(self.accuracy, feed_dict=feed_dict)
-    #         # accuracy = self.error_rate(eval_result, labels_batch)
-    #         _, loss_value, summary, self.global_step = self.sess.run([self.train_step, self.loss, self.merged_summaries,
-    #                                                                   self.global_step_var], feed_dict=feed_dict)
-    #
-    #         self.sw.add_summary(summary, global_step=self.global_step)
-    #
-    #         print('Loss step {}: {:.2f} [Subbatch error: {:.0f}%]'.format(self.global_step, loss_value,
-    #                                                                       100-(100*accuracy)))
-    #
-    # def eval_from_epoch(self, grid_matrix, labels, gradient_batch_sizes):
-    #     losses = []
-    #     for sub_iteration, (index, length) in enumerate(
-    #             zip(np.cumsum(gradient_batch_sizes) - gradient_batch_sizes, gradient_batch_sizes)):
-    #         grid_matrix_batch, labels_batch = get_batch(index, index + length, grid_matrix, labels)
-    #
-    #         feed_dict = dict({self.input: grid_matrix_batch,
-    #                           self.train_labels: labels_batch})
-    #
-    #         # eval_result = self.sess.run([self.layers[-1]], feed_dict=feed_dict)
-    #         # error = self.error_rate(eval_result, labels_batch)
-    #         accuracy = self.sess.run(self.test_accuracy, feed_dict=feed_dict)
-    #         losses.append(accuracy)
-    #         # print('Validation subbatch error: {:.0f}%'.format(100-(100*accuracy)))
-    #     return losses

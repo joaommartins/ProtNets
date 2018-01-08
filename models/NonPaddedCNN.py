@@ -25,7 +25,6 @@ from utils.batch_factory import get_batch
 
 class NonPaddedCNN(BaseModel):
     def _set_agent_props(self):
-        # with self.graph.as_default():
         if self.config.data_type == 'aa':
             self.output_size = 21
         else:
@@ -44,11 +43,14 @@ class NonPaddedCNN(BaseModel):
             # LAYER 0
             with tf.variable_scope('inputs'):
                 self.phase_train = tf.placeholder(tf.bool, name='phase_train')
-                self.input = tf.placeholder(tf.float32,
-                                            shape=[None] + self.input_shape,
-                                            name='input_values')
+
+                self.indices = tf.placeholder(tf.int32)
+                self.values = tf.placeholder(tf.float32)
+                self.shape = [self.config.batch_size] + self.input_shape
+                self.input = tf.sparse_to_dense(self.indices, self.shape, self.values, validate_indices=False)
+
                 self.train_labels = tf.placeholder(tf.float32, shape=[None, self.output_size],
-                                                    name='input_labels')
+                                                   name='input_labels')
                 self.dropout_keep_prob = tf.placeholder(tf.float32)
                 layer = self.input
                 self.layers.append({})
@@ -117,7 +119,6 @@ class NonPaddedCNN(BaseModel):
             self.print_layer(self.layers, -1, 'W')
             self.layers[-1]['output_layer'] = output_layer
             self.print_layer(self.layers, -1, 'output_layer')
-            # return graph
 
     def infer(self):
         pass

@@ -1,12 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-from models import BaseModel
-import numpy as np
-import tensorflow as tf
-from utils.batch_factory import get_batch
-
 # -*- coding: utf-8 -*-
 # Copyright (c) 2018 João Martins
 #
@@ -22,10 +13,16 @@ from utils.batch_factory import get_batch
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-class CNN(BaseModel):
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
+from models import BaseModel
+import tensorflow as tf
+
+
+class CNN(BaseModel):
     def _set_agent_props(self):
-        # with self.graph.as_default():
         if self.config.data_type == 'aa':
             self.output_size = 21
         else:
@@ -43,11 +40,15 @@ class CNN(BaseModel):
         with self.graph.as_default():
             # LAYER 0
             with tf.variable_scope('inputs'):
-                self.input = tf.placeholder(tf.float32,
-                                            shape=[None] + self.input_shape,
-                                            name='input_values')
+                self.phase_train = tf.placeholder(tf.bool, name='phase_train')
+
+                self.indices = tf.placeholder(tf.int32)
+                self.values = tf.placeholder(tf.float32)
+                self.shape = [self.config.batch_size] + self.input_shape
+                self.input = tf.sparse_to_dense(self.indices, self.shape, self.values, validate_indices=False)
+
                 self.train_labels = tf.placeholder(tf.float32, shape=[None, self.output_size],
-                                                    name='input_labels')
+                                                   name='input_labels')
                 self.dropout_keep_prob = tf.placeholder(tf.float32)
                 layer = self.input
                 self.layers.append({})
@@ -58,13 +59,13 @@ class CNN(BaseModel):
             with tf.variable_scope('layer1'):
                 self.layers.append({})
                 # Convlayer1
-                layer = self.conv_layer(layer, filter_size_3d=[4, 2, 5], output_depth=32,
-                                        stride=[1, 1, 2, 2, 1], layer_name='convolution', auto_pad=False,
-                                        explicit_pad=[0, 2, 2])
+                layer = self.conv_layer(layer, filter_size_3d=[3, 5, 5], output_depth=16,
+                                        stride=[1, 1, 2, 2, 1], layer_name='convolution',
+                                        batch_normalize=self.batch_normalization)
                 self.layers[-1]['convolution'] = layer
                 self.print_layer(self.layers, -1, 'convolution')
                 # MaxPoolLayer1
-                layer = self.pool_layer(layer, ksize=[1, 4, 2, 5, 1], stride=[1, 1, 2, 2, 1],
+                layer = self.pool_layer(layer, ksize=[1, 1, 3, 3, 1], stride=[1, 1, 2, 2, 1],
                                         layer_name='layer1', pool_type=tf.nn.avg_pool3d)
                 self.layers[-1]['pooling'] = layer
                 self.print_layer(self.layers, -1, 'pooling')
@@ -73,9 +74,9 @@ class CNN(BaseModel):
             with tf.variable_scope('layer2'):
                 self.layers.append({})
                 # Convlayer2
-                layer = self.conv_layer(layer, filter_size_3d=[2, 2, 4], output_depth=64,
-                                        stride=[1, 1, 1, 1, 1], layer_name='convolution', auto_pad=False,
-                                        explicit_pad=[0, 1, 1])
+                layer = self.conv_layer(layer, filter_size_3d=[3, 3, 3], output_depth=32,
+                                        stride=[1, 1, 1, 1, 1], layer_name='convolution',
+                                        batch_normalize=self.batch_normalization)
                 self.layers[-1]['convolution'] = layer
                 self.print_layer(self.layers, -1, 'convolution')
                 # MaxPoolLayer2
@@ -88,9 +89,9 @@ class CNN(BaseModel):
             with tf.variable_scope('layer3'):
                 self.layers.append({})
                 # Convlayer3
-                layer = self.conv_layer(layer, filter_size_3d=[2, 2, 3], output_depth=128,
-                                        stride=[1, 1, 1, 2, 1], layer_name='convolution', auto_pad=False,
-                                        explicit_pad=[0, 1, 1])
+                layer = self.conv_layer(layer, filter_size_3d=[3, 3, 3], output_depth=64,
+                                        stride=[1, 1, 1, 1, 1], layer_name='convolution',
+                                        batch_normalize=self.batch_normalization)
                 self.layers[-1]['convolution'] = layer
                 self.print_layer(self.layers, -1, 'convolution')
                 # MaxPoolLayer3
@@ -103,9 +104,9 @@ class CNN(BaseModel):
             with tf.variable_scope('layer4'):
                 self.layers.append({})
                 # Convlayer4
-                layer = self.conv_layer(layer, filter_size_3d=[3, 7, 3], output_depth=256,
-                                        stride=[1, 1, 2, 1, 1], layer_name='convolution', auto_pad=False,
-                                        explicit_pad=[0, 2, 1])
+                layer = self.conv_layer(layer, filter_size_3d=[3, 2, 3], output_depth=128,
+                                        stride=[1, 1, 1, 1, 1], layer_name='convolution',
+                                        batch_normalize=self.batch_normalization)
                 self.layers[-1]['convolution'] = layer
                 self.print_layer(self.layers, -1, 'convolution')
                 # MaxPoolLayer4
@@ -116,7 +117,8 @@ class CNN(BaseModel):
 
             # FC1
             self.layers.append({})
-            _, layer, weight = self.nn_layer(layer, 2048, 'FC1', dropout_keep_prob=self.dropout_keep_prob, conv2fc=True)
+            _, layer, weight = self.nn_layer(layer, 2048, 'FC1', dropout_keep_prob=self.dropout_keep_prob, conv2fc=True
+                                             , batch_normalize=self.batch_normalization)
             self.layers[-1]['W'] = weight
             self.print_layer(self.layers, -1, 'W')
             self.layers[-1]['FC1'] = layer
@@ -124,8 +126,8 @@ class CNN(BaseModel):
 
             # FC2
             self.layers.append({})
-            _, layer, weight = self.nn_layer(layer, 2048, 'FC2',
-                                             dropout_keep_prob=self.dropout_keep_prob)
+            _, layer, weight = self.nn_layer(layer, 2048, 'FC2', dropout_keep_prob=self.dropout_keep_prob,
+                                             batch_normalize=self.batch_normalization)
             self.layers[-1]['W'] = weight
             self.print_layer(self.layers, -1, 'W')
             self.layers[-1]['FC2'] = layer
@@ -134,7 +136,8 @@ class CNN(BaseModel):
             # OUTPUT LAYER (NAME MUST BE "output_layer" for loss to work)
             self.layers.append({})
             preactivated, output_layer, weight = self.nn_layer(layer, self.output_size, 'output_layer',
-                                                               dropout_keep_prob=1.0, act=tf.nn.softmax)
+                                                               dropout_keep_prob=1.0, act=tf.nn.softmax,
+                                                               batch_normalize=self.batch_norm)
             self.layers[-1]['preactivation'] = preactivated
             self.layers[-1]['W'] = weight
             self.print_layer(self.layers, -1, 'W')
