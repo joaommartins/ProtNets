@@ -88,29 +88,13 @@ def define_coordinate_system(pos_N, pos_CA, pos_C, z_direction):
     e1 = (pos_C-pos_N)
     e1 /= np.linalg.norm(e1)
 
-    # Define e2 as looking in the direction outwards from CA-N + CA-C
-    # e2 = (pos_CA-pos_N)+(pos_CA-pos_C)
-    # e2 /= np.linalg.norm(e2)
-
-    # CB_entries = np.logical_and(features[['res_index']].view(int) == residue_index, features[['name']].view('a5') == "CB")
-    # if CB_entries.any():
-    #     pos_CB = features[np.argmax(CB_entries)][['x','y','z']].view(np.float32)
-    #     print "pos_CB_real: ", pos_CB
-    # else:
-
     # Define CB positions by rotating N atoms around CA-C axis 120 degr
     pos_N_res = pos_N - pos_CA
-    # axis = pos_C - pos_CA
     axis = pos_CA - pos_C
     pos_CB = np.dot(Bio.PDB.rotaxis((120./180.)*np.pi, Bio.PDB.Vector(axis)), pos_N_res)
-    # e2 = (pos_CB-pos_CA)
     e2 = pos_CB
     e2 /= np.linalg.norm(e2)
 
-    #     dir(Bio.PDB.Vector)
-    #     pos_CB = np.dot(Bio.PDB.rotaxis((120./180.)*np.pi, Bio.PDB.Vector(axis)), pos_N_res)
-    # e2 = (pos_CB-pos_CA)
-    # e2 /= np.linalg.norm(e2)
     e3 = np.cross(e1, e2)
 
     # N-C and e2 are not perfectly perpendical to one another. We adjust e2.

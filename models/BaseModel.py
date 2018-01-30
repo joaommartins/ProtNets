@@ -278,8 +278,8 @@ class BaseModel(object):
 
     def bias_variable(self, shape, layer_name):
         """Create a bias variable with appropriate initialization."""
-        # initial = tf.zeros(shape, name='bias_{}'.format(layer_name)) # Modified to match Wouter's
-        initial = tf.truncated_normal(shape, stddev=self.config.initial_stddev, name='bias_{}'.format(layer_name))
+        # initial = tf.truncated_normal(shape, stddev=self.config.initial_stddev, name='bias_{}'.format(layer_name))
+        initial = tf.zeros(shape, name='bias_{}'.format(layer_name))
         return tf.Variable(initial)
 
     def nn_layer(self, input_tensor, output_dim, layer_name, dropout_keep_prob, act=tf.nn.relu, conv2fc=False,
@@ -390,6 +390,12 @@ class BaseModel(object):
         Return:
             normed:      batch-normalized maps
         """
+
+        def mean_var_with_update():
+            ema_apply_op = ema.apply([batch_mean, batch_var])
+            with tf.control_dependencies([ema_apply_op]):
+                return tf.identity(batch_mean), tf.identity(batch_var)
+
         if convolution:
             with tf.variable_scope('{}_bn_convolution'.format(layer)):
                 beta = tf.Variable(tf.constant(0.0, shape=[n_out]),
@@ -398,11 +404,6 @@ class BaseModel(object):
                                     name='gamma', trainable=True)
                 batch_mean, batch_var = tf.nn.moments(x, [0, 1, 2, 3], name='moments')
                 ema = tf.train.ExponentialMovingAverage(decay=0.5)
-
-                def mean_var_with_update():
-                    ema_apply_op = ema.apply([batch_mean, batch_var])
-                    with tf.control_dependencies([ema_apply_op]):
-                        return tf.identity(batch_mean), tf.identity(batch_var)
 
                 mean, var = tf.cond(phase_train,
                                     mean_var_with_update,
@@ -416,11 +417,6 @@ class BaseModel(object):
                                     name='gamma', trainable=True)
                 batch_mean, batch_var = tf.nn.moments(x, [0], name='moments')
                 ema = tf.train.ExponentialMovingAverage(decay=0.5)
-
-                def mean_var_with_update():
-                    ema_apply_op = ema.apply([batch_mean, batch_var])
-                    with tf.control_dependencies([ema_apply_op]):
-                        return tf.identity(batch_mean), tf.identity(batch_var)
 
                 mean, var = tf.cond(phase_train,
                                     mean_var_with_update,
