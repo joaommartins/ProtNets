@@ -74,7 +74,14 @@ def main(_):
     else:
         model = make_model(config)
         if config.mode == 'infer':
-            model.infer()
+            high_res_protein_feature_filenames = sorted(
+                glob.glob(os.path.join(config.pdb_folder, "*protein_features.npz")))
+            high_res_grid_feature_filenames = sorted(
+                glob.glob(os.path.join(config.pdb_folder, "*residue_features.npz")))
+            infer_data = SparseGenerator()
+            infer_data.load_data(high_res_protein_feature_filenames,
+                                 high_res_grid_feature_filenames)
+            model.infer(infer_data, config.residue_index)
         else:
             if config.mode == 'test':
                 model.test(test_data)
@@ -82,6 +89,7 @@ def main(_):
                 model.train(train_data, validation_data)
                 model.save('end')
             # No need to capture wrong mode, not allowed by argparser
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='''\t\t+-------------------------------------+
@@ -94,9 +102,6 @@ if __name__ == '__main__':
 \t\t|                                     |
 \t\t+-------------------------------------+
 ''', formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--sparse',
-                        action='store_true',
-                        help='Turns on sparse representation for data input (default: %(default)s)')
     parser.add_argument('--fullsearch',
                         action='store_true',
                         help='Perform a full search of hyperparameter space ex:(hyperband > lr search > hyperband '
@@ -201,5 +206,17 @@ if __name__ == '__main__':
     parser.add_argument("--batch-size",
                         help="Maximum batch size used for gradient calculation (default: %(default)s)", type=int,
                         default=25)
+    parser.add_argument("--residue-index",
+                        help="Residue index for inference mode", type=int)
+    parser.add_argument("--chain-id",
+                        help="Chain ID for inference mode", type=str)
+    parser.add_argument("--pdb-folder",
+                        help="PDB folder for inference mode", type=str)
+
     config = parser.parse_args()
+
+    if config.mode != 'infer' and (config.residue_index or config.chain_id or config.pdb_folder):
+        parser.error('Residue index and/or chain ID and/or PDB folder only used for inference mode.')
+    elif config.mode == 'infer' and not (config.residue_index or config.chain_id or config.pdb_folder):
+        parser.error('Residue index and/or chain ID and/or PDB folder not set.')
     tf.app.run(main=main)

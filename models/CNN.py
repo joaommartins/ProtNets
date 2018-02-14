@@ -44,7 +44,7 @@ class CNN(BaseModel):
 
                 self.indices = tf.placeholder(tf.int32)
                 self.values = tf.placeholder(tf.float32)
-                self.shape = [self.config.batch_size] + self.input_shape
+                self.shape = [self.batch_size] + self.input_shape
                 self.input = tf.sparse_to_dense(self.indices, self.shape, self.values, validate_indices=False)
 
                 self.train_labels = tf.placeholder(tf.float32, shape=[None, self.output_size],
@@ -145,5 +145,5 @@ class CNN(BaseModel):
             self.print_layer(self.layers, -1, 'output_layer')
             # return graph
 
-    def infer(self):
-        pass
+    # def infer(self):
+    #     pass

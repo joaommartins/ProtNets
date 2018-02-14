@@ -48,12 +48,15 @@ class BaseModel(object):
 
         # All models share some basics hyper parameters, this is the section where we
         # copy them into the model
-        self.sparse = self.config.sparse
         self.result_dir = self.config.result_dir
         self.max_iter = self.config.max_iter
         self.lr = self.config.lr
         self.batch_normalization = self.config.no_batch_norm
         self.dropout_seed = self.config.seed
+        if self.config.mode == 'infer':
+            self.batch_size = 1
+        else:
+            self.batch_size = self.config.batch_size
         # self.dropout_keep_prob = self.config.dropout
 
         # Again, child Model should provide its own build_grap function
@@ -157,9 +160,6 @@ class BaseModel(object):
     def _build_graph(self):
         raise Exception('The build_graph function must be overriden by the agent')
 
-    def infer(self):
-        raise Exception('The infer function must be overriden by the agent')
-
     # def learn_from_epoch(self, grid_matrix, labels, gradient_batch_sizes):
     #     # I like to separate the function to train per epoch and the function to train globally
     #     raise Exception('The learn_from_epoch function must be overriden by the agent')
@@ -246,9 +246,20 @@ class BaseModel(object):
             with open(os.path.join(self.result_dir,'config.json'), 'w') as f:
                 json.dump(self.config.__dict__, f)
 
-    def infer(self):
-        # This function is usually common to all your models
-        pass
+    def infer(self, infer_data, index):
+        aa1 = "ACDEFGHIKLMNPQRSTVWYX"
+        indices, values, hots = infer_data.infer(index)
+
+        feed_dict = dict({self.indices: indices,
+                          self.values: values,
+                          self.dropout_keep_prob: 1.0,
+                          self.phase_train: False})
+
+        result = self.sess.run(self.layers[-1]['output_layer'], feed_dict=feed_dict)
+        print('Expected:\t {}'.format(aa1[np.argmax(hots)]))
+        print('Predicted:\t {}'.format(aa1[np.argmax(result[0])]))
+        for index, val in enumerate(aa1):
+            print('{}: {}'.format(val, result[0][index]))
 
     def print_layer(self, layers, idx, name):
         if name == 'W':
