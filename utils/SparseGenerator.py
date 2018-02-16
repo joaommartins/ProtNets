@@ -78,13 +78,16 @@ class SparseGenerator:
         self._hold = True
 
     def grid_shape(self):
-        return [24, 76, 151, 5]  # FIXME: ADD CALL TO CLASS INSTANTIATION
+        return [24, 76, 151, 2]  # FIXME: ADD CALL TO CLASS INSTANTIATION
 
     def infer(self, residue_index):
         zeroth_index = residue_index - 1
         # zeroth_index = residue_index
         indices = np.insert(self.grid_indexes[zeroth_index], 0, 0, axis=1)
-        indices = np.insert(indices, 4, self.masses[zeroth_index], axis=1)
-        values = np.array([len(self.masses[zeroth_index]) * [1]])
+        # indices = np.insert(indices, 4, self.masses[zeroth_index], axis=1)
+        indices = np.array([(np.insert(x, 4, 0), np.insert(x, 4, 1)) for ind, x in enumerate(indices)])
+        values = np.array([np.concatenate((self.masses[zeroth_index][index], self.charges[zeroth_index][index]))
+                           for index, val in enumerate(self.masses[zeroth_index])])
+        # values = np.array([len(self.masses[zeroth_index]) * [1]])
         hots = np.array(self.aa_one_hot[zeroth_index])
-        return indices, np.concatenate(values).ravel(), hots
+        return np.concatenate(indices), np.concatenate(values).ravel(), hots
